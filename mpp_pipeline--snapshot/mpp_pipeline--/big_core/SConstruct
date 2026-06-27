@@ -1,0 +1,14 @@
+import os
+import sys
+
+# 1. 钉死官方 SDK 的绝对路径
+SDK_ROOT = '/home/ubuntu/k230_sdk/src/big/rt-smart'
+TOOLS_DIR = os.path.join(SDK_ROOT, 'tools')
+USERAPPS_DIR = os.path.join(SDK_ROOT, 'userapps')
+
+# 2. 将 tools 绝对路径加入 Python 环境变量
+sys.path = sys.path + [TOOLS_DIR]
+from building import *
+
+# 3. 告诉系统：编译大核程序 'big_app'，且系统资源的根目录(usr_root)也使用绝对路径
+BuildApplication('big_app', 'SConscript', usr_root = USERAPPS_DIR)
