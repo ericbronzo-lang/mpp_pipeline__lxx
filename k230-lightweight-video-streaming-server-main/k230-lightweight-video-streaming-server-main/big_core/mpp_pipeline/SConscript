@@ -1,0 +1,55 @@
+from building import *
+import os
+import glob
+
+cwd = GetCurrentDir()
+
+# --- 源码白名单 ---
+src = [
+    'mpp_pipeline.c',
+    'media_vb.c',
+    'media_venc.c',
+    'media_vicap.c',
+    'media_bind.c',
+    'media_cleanup.c',
+    'stream_export.c',
+    'stream_nalu_ipc.c',
+    'media_osd.c',
+    'motion_ai_frame.c',
+    'motion_detect_default.c',
+    'motion_detect.c',
+    'motion_adapter.c',
+    'motion_thread.c',
+]
+
+# --- MPP 头文件路径 ---
+MPP_INC = '/home/ubuntu/k230_sdk/src/big/mpp'
+DATAFIFO_ROOT = '/home/ubuntu/k230_sdk/src/common/cdk/user/component/datafifo'
+CPPPATH = [
+    cwd,
+    os.path.join(MPP_INC, 'include'),
+    os.path.join(MPP_INC, 'include/comm'),
+    os.path.join(MPP_INC, 'include/ioctl'),
+    os.path.join(MPP_INC, 'userapps/api'),
+    os.path.join(DATAFIFO_ROOT, 'include'),
+]
+
+# --- MPP 静态库 ---
+MPP_LIB_PATH = os.path.join(MPP_INC, 'userapps/lib')
+DATAFIFO_LIB_PATH = os.path.join(DATAFIFO_ROOT, 'host/lib')
+lib_files = glob.glob(os.path.join(MPP_LIB_PATH, 'lib*.a'))
+LIBS = [os.path.basename(f)[3:-2] for f in sorted(lib_files)]
+LIBS += ['datafifo']
+# MPP SDK 静态库内部引用 pthread_* 符号；应用层线程使用 RT-Thread API。
+LIBS += ['pthread', 'm']
+
+LIBPATH = [MPP_LIB_PATH, DATAFIFO_LIB_PATH]
+
+# --- 移除 -Werror (MPP 头文件 warning 不可控) ---
+env = GetEnv()
+old_flags = env.get('CCFLAGS', '')
+new_flags = old_flags.replace('-Werror', '')
+env.Replace(CCFLAGS=new_flags)
+
+group = DefineGroup('mpp_pipeline', src, depend=[''], CPPPATH=CPPPATH, LIBS=LIBS, LIBPATH=LIBPATH)
+Return('group')
