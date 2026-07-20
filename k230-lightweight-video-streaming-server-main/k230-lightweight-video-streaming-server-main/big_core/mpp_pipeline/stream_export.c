@@ -45,6 +45,7 @@ static const char *stream_export_mode_name(stream_export_mode mode)
 
 k_s32 stream_export_request_snapshot(const snapshot_request_msg *request)
 {
+    k_s32 idr_ret;
     snapshot_request_msg req;
     k_u32 pending;
 
@@ -73,6 +74,16 @@ k_s32 stream_export_request_snapshot(const snapshot_request_msg *request)
         req.source_chn,
         pending,
         req.path_hint[0] ? req.path_hint : "motion");
+
+    idr_ret = kd_mpi_venc_request_idr(req.source_chn);
+    if (idr_ret) {
+        LOG("Snapshot request IDR failed: event_id=%u chn=%u ret=0x%x; wait for natural IDR",
+            req.event_id, req.source_chn, idr_ret);
+    } else {
+        LOG("Snapshot immediate IDR requested: event_id=%u chn=%u",
+            req.event_id, req.source_chn);
+    }
+
     return 0;
 }
 

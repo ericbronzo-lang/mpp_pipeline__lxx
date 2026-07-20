@@ -15,6 +15,7 @@
 #define NALU_IPC_DROP_LOG_INTERVAL 30ULL
 #define NALU_IPC_READ_DONE_LOG_INTERVAL 150ULL
 #define NALU_IPC_READ_DONE_SLOW_MS 100ULL
+#define NALU_IPC_DRAIN_MAX_PASSES 4U
 
 typedef struct {
     k_bool in_use;
@@ -90,6 +91,51 @@ static k_s32 nalu_ipc_drop_current_stream(k_u64 seq,
     }
 
     return -1;
+}
+
+static void nalu_ipc_log_pending_slots(const char *reason, k_u32 avail_write_len)
+{
+    k_u64 now_ms = nalu_ipc_now_ms();
+    k_bool any_pending = K_FALSE;
+
+    for (k_u32 i = 0; i < NALU_IPC_PENDING_MAX; i++) {
+        if (!g_pending[i].in_use)
+            continue;
+
+        any_pending = K_TRUE;
+        LOG("NALU IPC pending slot: reason=%s slot=%u seq=%llu chn=%u age_ms=%llu total_len=%u avail=%u",
+            reason ? reason : "unknown",
+            i,
+            (unsigned long long)g_pending[i].ipc_msg.seq,
+            g_pending[i].ipc_msg.chn,
+            (unsigned long long)(now_ms - g_pending[i].ipc_msg.submit_time_ms),
+            g_pending[i].ipc_msg.total_len,
+            avail_write_len);
+    }
+
+    if (!any_pending) {
+        LOG("NALU IPC pending slot: reason=%s none pending=%u avail=%u",
+            reason ? reason : "unknown", g_pending_count, avail_write_len);
+    }
+}
+
+static k_s32 nalu_ipc_drain_releases(void)
+{
+    k_s32 ret = 0;
+    k_u32 last_pending = g_pending_count;
+
+    for (k_u32 pass = 0; pass < NALU_IPC_DRAIN_MAX_PASSES; pass++) {
+        ret = kd_datafifo_write(g_nalu_fifo, NULL);
+        if (ret)
+            return ret;
+
+        if (g_pending_count == 0 || g_pending_count >= last_pending)
+            break;
+
+        last_pending = g_pending_count;
+    }
+
+    return ret;
 }
 
 static void nalu_ipc_msg_to_release_stream(const mpp_nalu_ipc_msg *msg,
@@ -294,10 +340,10 @@ k_s32 nalu_ipc_submit_stream(k_u32 chn,
     submit_time_ms = nalu_ipc_now_ms();
 
     /* A successful submit transfers release responsibility to this backend. */
-    /* Flush release notifications from the reader side before checking space. */
-    ret = kd_datafifo_write(g_nalu_fifo, NULL);
+    /* Drain release notifications from the reader side before checking space. */
+    ret = nalu_ipc_drain_releases();
     if (ret) {
-        LOG("kd_datafifo_write(NULL) failed! ret=0x%x", ret);
+        LOG("nalu_ipc_drain_releases failed! ret=0x%x", ret);
         g_write_fail_count++;
         (void)nalu_ipc_drop_current_stream(seq, "flush_failed", 0);
         return ret;
@@ -320,8 +366,21 @@ k_s32 nalu_ipc_submit_stream(k_u32 chn,
 
     pending = nalu_ipc_alloc_pending();
     if (!pending) {
-        g_pending_full_count++;
-        return nalu_ipc_drop_current_stream(seq, "pending_full", avail_write_len);
+        nalu_ipc_log_pending_slots("pending_full_before_drain", avail_write_len);
+        ret = nalu_ipc_drain_releases();
+        if (ret) {
+            LOG("nalu_ipc_drain_releases on pending_full failed! ret=0x%x", ret);
+            g_write_fail_count++;
+            (void)nalu_ipc_drop_current_stream(seq, "pending_full_drain_failed", avail_write_len);
+            return ret;
+        }
+
+        pending = nalu_ipc_alloc_pending();
+        if (!pending) {
+            g_pending_full_count++;
+            nalu_ipc_log_pending_slots("pending_full_after_drain", avail_write_len);
+            return nalu_ipc_drop_current_stream(seq, "pending_full_after_drain", avail_write_len);
+        }
     }
 
     nalu_ipc_build_msg(&pending->ipc_msg, chn, stream, seq, submit_time_ms, flags);
@@ -371,7 +430,7 @@ k_s32 nalu_ipc_flush(void)
     if (!g_nalu_fifo_inited || g_nalu_fifo == K_DATAFIFO_INVALID_HANDLE)
         return 0;
 
-    return kd_datafifo_write(g_nalu_fifo, NULL);
+    return nalu_ipc_drain_releases();
 }
 
 k_u32 nalu_ipc_get_pending_count(void)
@@ -389,7 +448,7 @@ void nalu_ipc_deinit(void)
     if (!g_nalu_fifo_inited || g_nalu_fifo == K_DATAFIFO_INVALID_HANDLE)
         return;
 
-    kd_datafifo_write(g_nalu_fifo, NULL);
+    nalu_ipc_drain_releases();
 
     for (k_u32 i = 0; i < NALU_IPC_PENDING_MAX; i++) {
         if (g_pending[i].in_use) {

@@ -76,8 +76,6 @@ int nalu_datafifo_read(nalu_datafifo_reader_t *reader,
                        const mpp_nalu_ipc_msg **out_msg,
                        void **out_item);
 
-int nalu_datafifo_get_avail_read_len(nalu_datafifo_reader_t *reader,
-                                     k_u32 *read_len);
 int nalu_datafifo_read_done(nalu_datafifo_reader_t *reader, void *item);
 int nalu_datafifo_validate_msg(const mpp_nalu_ipc_msg *msg);
 

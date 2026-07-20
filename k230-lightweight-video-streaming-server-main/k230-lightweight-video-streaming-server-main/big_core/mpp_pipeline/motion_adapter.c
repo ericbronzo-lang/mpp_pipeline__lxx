@@ -4,7 +4,7 @@
 #define MOTION_CONFIRM_FRAMES   3U
 #define MOTION_CLEAR_FRAMES     5U
 #define MOTION_COOLDOWN_MS      1000U
-#define MOTION_OSD_DURATION_MS  400U
+#define MOTION_OSD_DURATION_MS  1000U
 
 static k_u32 g_motion_event_id;
 static k_u32 g_motion_hit_frames;
